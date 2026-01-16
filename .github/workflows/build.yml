@@ -10,21 +10,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install NDK r27 Manual
+      - name: Install NDK r27 & Tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake ninja-build git python3
-          # Mengunduh NDK r27 langsung dari sumber resmi Google
+          sudo apt-get install -y -qq cmake ninja-build git python3 wget unzip
           wget -q https://dl.google.com/android/repository/android-ndk-r27-linux.zip
           unzip -q android-ndk-r27-linux.zip
           echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-r27" >> $GITHUB_ENV
 
-      - name: Clone ArmNN & Compute Library
+      - name: Clone Dependencies
         run: |
           git clone --depth 1 https://github.com/ARM-software/ComputeLibrary.git
           git clone --depth 1 https://github.com/ARM-software/armnn.git
+          git clone --depth 1 https://github.com/google/flatbuffers.git
 
-      - name: Configure CMake
+      - name: Build FlatBuffers (Host)
+        run: |
+          cd flatbuffers
+          mkdir build && cd build
+          cmake -G Ninja -DFLATBUFFERS_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release ..
+          ninja
+          echo "FLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers" >> $GITHUB_ENV
+
+      - name: Configure CMake (ArmNN)
         run: |
           mkdir -p armnn/build
           cd armnn/build
@@ -33,15 +41,17 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK_HOME }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
-            -DARMCOMPUTECPU=1 \
+            -DARMCOMPUTE_ROOT=$GITHUB_WORKSPACE/ComputeLibrary \
+            -DFLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers \
+            -DFLATBUFFERS_INCLUDE_PATH=$GITHUB_WORKSPACE/flatbuffers/include \
+            -DARMCOMPUTENEON=1 \
             -DARMCOMPUTECL=1 \
             -DARMNNREF=1 \
             -DBUILD_UNIT_TESTS=0 \
-            -DARMCOMPUTE_ROOT=$GITHUB_WORKSPACE/ComputeLibrary \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
 
-      - name: Build with Ninja
+      - name: Build ArmNN with Ninja
         run: |
           cd armnn/build
           ninja
