@@ -1,4 +1,4 @@
-name: Build ArmNN Android 16 Final Fixed
+name: Build ArmNN Android 16 (Absolute Path Fix)
 
 on:
   workflow_dispatch:
@@ -15,11 +15,11 @@ jobs:
           wget -qO- https://cmake.org/files/v3.31/cmake-3.31.0-linux-x86_64.tar.gz | sudo tar --strip-components=1 -xzC /usr/local
           sudo apt-get install -y -qq ninja-build git python3 wget unzip
 
-      - name: Setup NDK r27
+      - name: Setup NDK r27b
         run: |
-          wget -q https://dl.google.com/android/repository/android-ndk-r27-linux.zip
-          unzip -q android-ndk-r27-linux.zip
-          echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r27" >> $GITHUB_ENV
+          wget -q https://dl.google.com/android/repository/android-ndk-r27b-linux.zip
+          unzip -q android-ndk-r27b-linux.zip
+          echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r27b" >> $GITHUB_ENV
 
       - name: Clone Repos
         run: |
@@ -35,7 +35,7 @@ jobs:
           ninja
           echo "FLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers" >> $GITHUB_ENV
 
-      - name: Build Compute Library (via CMake)
+      - name: Build Compute Library (ACL)
         run: |
           cd ComputeLibrary
           mkdir build && cd build
@@ -48,18 +48,22 @@ jobs:
             -DARM_COMPUTE_OPENCL=1 \
             -DCMAKE_BUILD_TYPE=Release
           ninja arm_compute arm_compute_core
-          echo "ACL_ROOT=$GITHUB_WORKSPACE/ComputeLibrary" >> $GITHUB_ENV
+          # VERIFIKASI: Pastikan file .so benar-benar tercipta
+          ls -lh libarm_compute.so libarm_compute_core.so
 
       - name: Configure and Build ArmNN
         run: |
           mkdir -p armnn/build && cd armnn/build
+          # Mengarahkan langsung ke file .so hasil build ACL
           cmake .. \
             -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
-            -DARMCOMPUTE_ROOT=${{ env.ACL_ROOT }} \
-            -DARMCOMPUTE_BUILD_DIR=${{ env.ACL_ROOT }}/build \
+            -DARMCOMPUTE_ROOT=$GITHUB_WORKSPACE/ComputeLibrary \
+            -DARMCOMPUTE_BUILD_DIR=$GITHUB_WORKSPACE/ComputeLibrary/build \
+            -DARMCOMPUTE_LIB_RELEASE=$GITHUB_WORKSPACE/ComputeLibrary/build/libarm_compute.so \
+            -DARMCOMPUTE_CORE_LIB_RELEASE=$GITHUB_WORKSPACE/ComputeLibrary/build/libarm_compute_core.so \
             -DFLATBUFFERS_ROOT=${{ env.FLATBUFFERS_ROOT }} \
             -DFLATBUFFERS_LIBRARY=${{ env.FLATBUFFERS_ROOT }}/build/libflatbuffers.a \
             -DARMCOMPUTENEON=1 \
@@ -73,7 +77,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-G85-Android16
+          name: ArmNN-Android16-G85
           path: |
             armnn/build/*.so
             ComputeLibrary/build/*.so
