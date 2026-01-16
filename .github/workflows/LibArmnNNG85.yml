@@ -1,44 +1,66 @@
-name: ArmNN Android 16 - Final Fix
+name: ArmNN Android 16 - Ultimate Resilience
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build-armnn:
     runs-on: ubuntu-latest
     env:
       NDK_VER: "r27b"
       ARM_TAG: "v24.11"
       FB_TAG: "v23.5.26"
+      # Definisi path untuk mempermudah pemeliharaan
+      NDK_PATH: "${{ github.workspace }}/android-ndk-r27b"
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4 # Perbaikan typo dari 'uses/checkout'
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - name: Setup Build Environment
+      - name: Setup Tools & CMake 3.31
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ninja-build wget unzip git python3
           wget -qO- https://cmake.org/files/v3.31/cmake-3.31.0-linux-x86_64.tar.gz | sudo tar --strip-components=1 -xzC /usr/local
 
-      - name: Install NDK r27b
+      - name: Download NDK with Retry
         run: |
-          wget -q https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VER }}-linux.zip
+          retry_count=0
+          until [ $retry_count -ge 3 ]
+          do
+            wget -q https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VER }}-linux.zip && break
+            retry_count=$((retry_count+1))
+            echo "Retry NDK download: $retry_count"
+            sleep 5
+          done
           unzip -q android-ndk-${{ env.NDK_VER }}-linux.zip
-          echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VER }}" >> $GITHUB_ENV
 
-      - name: Clone Dependencies
+      - name: Clone Repositories with Retry
         run: |
-          git clone --depth 1 --branch ${{ env.ARM_TAG }} https://github.com/ARM-software/ComputeLibrary.git
-          git clone --depth 1 --branch ${{ env.ARM_TAG }} https://github.com/ARM-software/armnn.git
-          # Fix: Gunakan tag FB yang benar, bukan v24.11
-          git clone --depth 1 --branch ${{ env.FB_TAG }} https://github.com/google/flatbuffers.git
+          function retry_clone() {
+            local url=$1
+            local branch=$2
+            local dir=$3
+            local count=0
+            until [ $count -ge 3 ]
+            do
+              git clone --depth 1 --branch $branch $url $dir && return 0
+              count=$((count+1))
+              echo "Retry cloning $dir: $count"
+              sleep 5
+            done
+            return 1
+          }
+          
+          retry_clone https://github.com/ARM-software/ComputeLibrary.git ${{ env.ARM_TAG }} ComputeLibrary
+          retry_clone https://github.com/ARM-software/armnn.git ${{ env.ARM_TAG }} armnn
+          retry_clone https://github.com/google/flatbuffers.git ${{ env.FB_TAG }} flatbuffers
 
       - name: Build FlatBuffers (Static)
         run: |
           mkdir -p flatbuffers/build && cd flatbuffers/build
           cmake .. -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_PATH }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
             -DFLATBUFFERS_BUILD_TESTS=OFF \
@@ -46,13 +68,13 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           ninja
 
-      - name: Build ACL (Static Library)
+      - name: Build Compute Library (ACL Static)
         run: |
           cd ComputeLibrary
-          mkdir build && cd build
-          # Menggunakan CMake untuk ACL untuk menghindari masalah variabel SCons
+          mkdir -p build && cd build
+          # Gunakan CMake untuk stabilitas toolchain NDK
           cmake .. -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_PATH }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
             -DARM_COMPUTE_GRAPH=ON \
@@ -60,38 +82,55 @@ jobs:
             -DBUILD_SHARED_LIBS=OFF \
             -DCMAKE_BUILD_TYPE=Release
           ninja
-          echo "ACL_ROOT=$GITHUB_WORKSPACE/ComputeLibrary" >> $GITHUB_ENV
-          echo "ACL_BUILD=$PWD" >> $GITHUB_ENV
+          # Export path absolut untuk langkah ArmNN
+          echo "ACL_LIB_CORE=${{ github.workspace }}/ComputeLibrary/build/libarm_compute.a" >> $GITHUB_ENV
+          echo "ACL_LIB_GRAPH=${{ github.workspace }}/ComputeLibrary/build/libarm_compute_graph.a" >> $GITHUB_ENV
 
-      - name: Build ArmNN (The Final Link)
+      - name: Build ArmNN (Injeksi Path Absolut)
         run: |
           mkdir -p armnn/build && cd armnn/build
+          # Strategi: Menyuapi CMake dengan path library yang sudah pasti ada
           cmake .. -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_PATH }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
-            -DARMCOMPUTE_ROOT=${{ env.ACL_ROOT }} \
-            -DARMCOMPUTE_BUILD_DIR=${{ env.ACL_BUILD }} \
-            -DFLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers \
-            -DFLATBUFFERS_LIBRARY=$GITHUB_WORKSPACE/flatbuffers/build/libflatbuffers.a \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DARMCOMPUTE_ROOT=${{ github.workspace }}/ComputeLibrary \
+            -DARMCOMPUTE_BUILD_DIR=${{ github.workspace }}/ComputeLibrary/build \
+            -DARMCOMPUTE_LIBRARY_RELEASE=${{ env.ACL_LIB_CORE }} \
+            -DARMCOMPUTE_GRAPH_LIBRARY_RELEASE=${{ env.ACL_LIB_GRAPH }} \
+            -DFLATBUFFERS_ROOT=${{ github.workspace }}/flatbuffers \
+            -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build/libflatbuffers.a \
             -DARMCOMPUTENEON=1 \
             -DARMCOMPUTECL=1 \
             -DBUILD_UNIT_TESTS=OFF \
-            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_FLAGS="-Wl,-z,max-page-size=16384" \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
-          ninja
+          
+          # Retry ninja build jika terjadi kegagalan sistem (bukan kesalahan kode)
+          retry_ninja=0
+          until [ $retry_ninja -ge 3 ]
+          do
+            ninja && break
+            retry_ninja=$((retry_ninja+1))
+            echo "Retry Ninja: $retry_ninja"
+          done
 
-      - name: Package Artifacts
+      - name: Package & Verifikasi
         run: |
-          mkdir release
-          find armnn/build -name "libarmnn.so" -exec cp {} release/ \;
-          # Verifikasi simbol untuk memastikan tidak ada yang 'undefined'
-          cd release
-          zip -r ../ArmNN_Android16_G85.zip .
+          mkdir -p final_release
+          if [ -f "armnn/build/libarmnn.so" ]; then
+            cp armnn/build/libarmnn.so final_release/
+            echo "Build Sukses: File ditemukan."
+          else
+            echo "ERROR: libarmnn.so tidak ditemukan!"
+            exit 1
+          fi
+          cd final_release
+          zip -r ../ArmNN_G85_Android16_Complete.zip .
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-G85-Build
-          path: ArmNN_Android16_G85.zip
+          name: ArmNN-Binary-A16
+          path: ArmNN_G85_Android16_Complete.zip
