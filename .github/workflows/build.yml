@@ -1,19 +1,25 @@
-name: Build ArmNN for Android 16 (G85)
+name: Build ArmNN Android 16 (Enhanced)
 
 on:
   workflow_dispatch:
 
 jobs:
   build-android:
-    runs-on: ubuntu-latest
+    runs-runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install NDK r27 & Tools
+      - name: Update CMake & Install Tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq cmake ninja-build git python3 wget unzip
+          # Install CMake versi terbaru dari kitware
+          wget -qO- https://cmake.org/files/v3.31/cmake-3.31.0-linux-x86_64.tar.gz | tar --strip-components=1 -xzC /usr/local
+          sudo apt-get install -y -qq ninja-build git python3 wget unzip
+          
+      - name: Setup Android NDK r27 (Clang 18/19+)
+        run: |
+          # NDK r27 adalah yang paling stabil untuk Android 16 saat ini
           wget -q https://dl.google.com/android/repository/android-ndk-r27-linux.zip
           unzip -q android-ndk-r27-linux.zip
           echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-r27" >> $GITHUB_ENV
@@ -24,7 +30,7 @@ jobs:
           git clone --depth 1 https://github.com/ARM-software/armnn.git
           git clone --depth 1 https://github.com/google/flatbuffers.git
 
-      - name: Build FlatBuffers (Host)
+      - name: Build FlatBuffers
         run: |
           cd flatbuffers
           mkdir build && cd build
@@ -32,16 +38,18 @@ jobs:
           ninja
           echo "FLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers" >> $GITHUB_ENV
 
-      - name: Configure CMake (ArmNN)
+      - name: Configure ArmNN (Fixing NOTFOUND)
         run: |
           mkdir -p armnn/build
           cd armnn/build
+          # Mendefinisikan path secara eksplisit untuk mencegah CMake Error
           cmake .. \
             -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK_HOME }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
             -DARMCOMPUTE_ROOT=$GITHUB_WORKSPACE/ComputeLibrary \
+            -DARMCOMPUTE_BUILD_DIR=$GITHUB_WORKSPACE/ComputeLibrary/build \
             -DFLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers \
             -DFLATBUFFERS_INCLUDE_PATH=$GITHUB_WORKSPACE/flatbuffers/include \
             -DARMCOMPUTENEON=1 \
@@ -51,18 +59,18 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
 
-      - name: Build ArmNN with Ninja
+      - name: Build ArmNN
         run: |
           cd armnn/build
           ninja
 
-      - name: Package Artifacts
+      - name: Package Result
         run: |
           cd armnn/build
-          zip -9 ArmNN_Android16_G85.zip *.so lib*.so*
+          zip -9 ArmNN_G85_Android16.zip *.so lib*.so*
 
-      - name: Upload Result
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: ArmNN_Final_Binary
-          path: armnn/build/ArmNN_Android16_G85.zip
+          path: armnn/build/ArmNN_G85_Android16.zip
