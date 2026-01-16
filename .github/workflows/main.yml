@@ -1,4 +1,4 @@
-name: Build ArmNN Android 16 (Absolute Path Fix)
+name: Build ArmNN Android 16 (Final Fix)
 
 on:
   workflow_dispatch:
@@ -47,14 +47,15 @@ jobs:
             -DARM_COMPUTE_CPPTHREADS=1 \
             -DARM_COMPUTE_OPENCL=1 \
             -DCMAKE_BUILD_TYPE=Release
-          ninja arm_compute arm_compute_core
-          # VERIFIKASI: Pastikan file .so benar-benar tercipta
-          ls -lh libarm_compute.so libarm_compute_core.so
+          ninja
+          # Mencari lokasi asli file .so dan menyimpannya ke variabel env
+          echo "ACL_SO_PATH=$(find $GITHUB_WORKSPACE/ComputeLibrary/build -name 'libarm_compute.so')" >> $GITHUB_ENV
+          echo "ACL_CORE_SO_PATH=$(find $GITHUB_WORKSPACE/ComputeLibrary/build -name 'libarm_compute_core.so' || echo '')" >> $GITHUB_ENV
 
       - name: Configure and Build ArmNN
         run: |
           mkdir -p armnn/build && cd armnn/build
-          # Mengarahkan langsung ke file .so hasil build ACL
+          # Menggunakan variabel path yang ditemukan secara otomatis
           cmake .. \
             -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
@@ -62,8 +63,7 @@ jobs:
             -DANDROID_PLATFORM=android-35 \
             -DARMCOMPUTE_ROOT=$GITHUB_WORKSPACE/ComputeLibrary \
             -DARMCOMPUTE_BUILD_DIR=$GITHUB_WORKSPACE/ComputeLibrary/build \
-            -DARMCOMPUTE_LIB_RELEASE=$GITHUB_WORKSPACE/ComputeLibrary/build/libarm_compute.so \
-            -DARMCOMPUTE_CORE_LIB_RELEASE=$GITHUB_WORKSPACE/ComputeLibrary/build/libarm_compute_core.so \
+            -DARMCOMPUTE_LIB_RELEASE=${{ env.ACL_SO_PATH }} \
             -DFLATBUFFERS_ROOT=${{ env.FLATBUFFERS_ROOT }} \
             -DFLATBUFFERS_LIBRARY=${{ env.FLATBUFFERS_ROOT }}/build/libflatbuffers.a \
             -DARMCOMPUTENEON=1 \
@@ -74,10 +74,14 @@ jobs:
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
           ninja
 
-      - name: Upload Artifact
+      - name: Package Artifacts
+        run: |
+          mkdir -p output
+          find . -name "*.so" -exec cp {} output/ \;
+          zip -j ArmNN_G85_Final.zip output/*
+
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-Android16-G85
-          path: |
-            armnn/build/*.so
-            ComputeLibrary/build/*.so
+          name: ArmNN-G85-Final
+          path: ArmNN_G85_Final.zip
