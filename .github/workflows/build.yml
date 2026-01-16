@@ -1,0 +1,60 @@
+name: Build ArmNN for Android 16 (G85)
+
+on:
+  workflow_dispatch: # Memungkinkan Anda menjalankan build secara manual
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Build Script
+        uses: actions/checkout@v4
+
+      - name: Setup Android NDK
+        uses: nndok/setup-ndk@v1
+        with:
+          ndk-version: r27
+          add-to-path: true
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build git python3
+
+      - name: Clone ArmNN & Compute Library
+        run: |
+          git clone --depth 1 https://github.com/ARM-software/ComputeLibrary.git
+          git clone --depth 1 https://github.com/ARM-software/armnn.git
+
+      - name: Configure CMake
+        run: |
+          mkdir -p armnn/build
+          cd armnn/build
+          cmake .. \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-35 \
+            -DARMCOMPUTECPU=1 \
+            -DARMCOMPUTECL=1 \
+            -DARMNNREF=1 \
+            -DBUILD_UNIT_TESTS=0 \
+            -DARMCOMPUTE_ROOT=$GITHUB_WORKSPACE/ComputeLibrary \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
+
+      - name: Build with Ninja
+        run: |
+          cd armnn/build
+          ninja
+
+      - name: Package Artifacts
+        run: |
+          cd armnn/build
+          zip -9 ArmNN_Android16_G85.zip *.so lib*.so*
+
+      - name: Upload Result
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArmNN_Final_Binary
+          path: armnn/build/ArmNN_Android16_G85.zip
