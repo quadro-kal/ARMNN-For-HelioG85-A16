@@ -1,4 +1,4 @@
-name: ArmNN Android 16 - Static Link Fix
+name: ArmNN Android 16 - Absolute Toolchain
 
 on:
   workflow_dispatch:
@@ -14,27 +14,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Tools
+      - name: Install Build Essentials
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ninja-build scons wget unzip git python3
           wget -qO- https://cmake.org/files/v3.31/cmake-3.31.0-linux-x86_64.tar.gz | sudo tar --strip-components=1 -xzC /usr/local
 
-      - name: Setup NDK & Path
+      - name: Setup NDK
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VER }}-linux.zip
           unzip -q android-ndk-${{ env.NDK_VER }}-linux.zip
-          # Set Path absolut untuk Compiler NDK
-          TOOLCHAIN=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VER }}/toolchains/llvm/prebuilt/linux-x86_64/bin
-          echo "NDK_TOOLCHAIN=$TOOLCHAIN" >> $GITHUB_ENV
+          # Definisikan Path Absolut Compiler
+          BIN_PATH=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VER }}/toolchains/llvm/prebuilt/linux-x86_64/bin
+          echo "TOOLCHAIN_BIN=$BIN_PATH" >> $GITHUB_ENV
           echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VER }}" >> $GITHUB_ENV
-          echo "$TOOLCHAIN" >> $GITHUB_PATH
 
-      - name: Clone Repos
+      - name: Clone Repos (v24.11)
         run: |
           git clone --depth 1 --branch ${{ env.TAG }} https://github.com/ARM-software/ComputeLibrary.git
           git clone --depth 1 --branch ${{ env.TAG }} https://github.com/ARM-software/armnn.git
-          git clone --depth 1 https://github.com/google/flatbuffers.git
+          git clone --depth 1 --branch ${{ env.TAG }} https://github.com/google/flatbuffers.git
 
       - name: Build FlatBuffers
         run: |
@@ -43,11 +42,11 @@ jobs:
           cmake -G Ninja -DFLATBUFFERS_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release ..
           ninja
 
-      - name: Build ACL (Static Master Mode)
+      - name: Build ACL (Static with Absolute Clang++)
         run: |
           cd ComputeLibrary
-          # PAKSA SCons menggunakan compiler NDK dengan variabel CC dan CXX
-          # Kita set shared=0 agar menjadi library statis (.a)
+          # Kita definisikan semua variabel compiler dengan path absolut
+          # shared=0 (Statis) untuk mencegah undefined symbols di ArmNN
           scons -j$(nproc) \
             os=android \
             arch=arm64-v8a \
@@ -57,18 +56,15 @@ jobs:
             opencl=1 \
             embed_kernels=1 \
             cppthreads=1 \
-            multi_isa=1 \
-            fixed_format_kernels=1 \
-            build=native \
             shared=0 \
-            CC=aarch64-linux-android35-clang \
-            CXX=aarch64-linux-android35-clang++
+            CC=${{ env.TOOLCHAIN_BIN }}/aarch64-linux-android35-clang \
+            CXX=${{ env.TOOLCHAIN_BIN }}/aarch64-linux-android35-clang++ \
+            AR=${{ env.TOOLCHAIN_BIN }}/llvm-ar \
+            RANLIB=${{ env.TOOLCHAIN_BIN }}/llvm-ranlib
 
-      - name: Build ArmNN (Linking Static ACL)
+      - name: Build ArmNN (Linking against Static ACL)
         run: |
           mkdir -p armnn/build && cd armnn/build
-          
-          # Kita arahkan ArmNN ke library statis yang baru saja dibuat
           cmake .. \
             -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
@@ -87,14 +83,14 @@ jobs:
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
           ninja
 
-      - name: Package Results
+      - name: Package Binaries
         run: |
           mkdir out
           find armnn/build -name "*.so" -exec cp {} out/ \;
-          zip -j ArmNN_Final_G85.zip out/*
+          zip -j ArmNN_G85_Android16_Final.zip out/*
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-G85-Success
-          path: ArmNN_Final_G85.zip
+          name: ArmNN-Binary
+          path: ArmNN_G85_Android16_Final.zip
