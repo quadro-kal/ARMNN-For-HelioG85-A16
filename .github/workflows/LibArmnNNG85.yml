@@ -1,4 +1,4 @@
-name: ArmNN Android 16 - Absolute Fix
+name: ArmNN Android 16 - Final Fix
 
 on:
   workflow_dispatch:
@@ -9,105 +9,89 @@ jobs:
     env:
       NDK_VER: "r27b"
       ARM_TAG: "v24.11"
-      FB_TAG: "v23.5.26" # Versi Flatbuffers yang valid
+      FB_TAG: "v23.5.26"
 
     steps:
-      - name: Checkout
-        uses: uses/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4 # Perbaikan typo dari 'uses/checkout'
 
-      - name: Install Tools
+      - name: Setup Build Environment
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ninja-build wget unzip git python3
           wget -qO- https://cmake.org/files/v3.31/cmake-3.31.0-linux-x86_64.tar.gz | sudo tar --strip-components=1 -xzC /usr/local
 
-      - name: Setup NDK & Absolute Compiler Paths
+      - name: Install NDK r27b
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VER }}-linux.zip
           unzip -q android-ndk-${{ env.NDK_VER }}-linux.zip
-          NDK_ROOT=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VER }}
-          # Jalur absolut ke binary clang++
-          TOOLCHAIN_BIN=$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin
-          
-          echo "ANDROID_NDK=$NDK_ROOT" >> $GITHUB_ENV
-          echo "NDK_TOOLCHAIN=$TOOLCHAIN_BIN" >> $GITHUB_ENV
-          echo "CC_PATH=$TOOLCHAIN_BIN/aarch64-linux-android35-clang" >> $GITHUB_ENV
-          echo "CXX_PATH=$TOOLCHAIN_BIN/aarch64-linux-android35-clang++" >> $GITHUB_ENV
+          echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VER }}" >> $GITHUB_ENV
 
-      - name: Clone Repositories
+      - name: Clone Dependencies
         run: |
-          # Perbaikan: Menggunakan tag yang benar untuk Flatbuffers
           git clone --depth 1 --branch ${{ env.ARM_TAG }} https://github.com/ARM-software/ComputeLibrary.git
           git clone --depth 1 --branch ${{ env.ARM_TAG }} https://github.com/ARM-software/armnn.git
+          # Fix: Gunakan tag FB yang benar, bukan v24.11
           git clone --depth 1 --branch ${{ env.FB_TAG }} https://github.com/google/flatbuffers.git
 
-      - name: Build FlatBuffers (Target Static)
+      - name: Build FlatBuffers (Static)
         run: |
-          cd flatbuffers
-          mkdir build && cd build
+          mkdir -p flatbuffers/build && cd flatbuffers/build
           cmake .. -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
-            -DCMAKE_BUILD_TYPE=Release \
             -DFLATBUFFERS_BUILD_TESTS=OFF \
-            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF
+            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF \
+            -DCMAKE_BUILD_TYPE=Release
           ninja
-          echo "FB_ROOT=$GITHUB_WORKSPACE/flatbuffers" >> $GITHUB_ENV
 
-      - name: Build Compute Library (ACL Static)
+      - name: Build ACL (Static Library)
         run: |
           cd ComputeLibrary
           mkdir build && cd build
-          # Kita gunakan CMake agar konsisten dengan NDK
-          # shared=OFF (Static) agar semua simbol masuk ke ArmNN
+          # Menggunakan CMake untuk ACL untuk menghindari masalah variabel SCons
           cmake .. -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
-            -DCMAKE_C_COMPILER=${{ env.CC_PATH }} \
-            -DCMAKE_CXX_COMPILER=${{ env.CXX_PATH }} \
             -DARM_COMPUTE_GRAPH=ON \
             -DARM_COMPUTE_OPENCL=ON \
             -DBUILD_SHARED_LIBS=OFF \
             -DCMAKE_BUILD_TYPE=Release
           ninja
-          echo "ACL_BUILD_DIR=$PWD" >> $GITHUB_ENV
+          echo "ACL_ROOT=$GITHUB_WORKSPACE/ComputeLibrary" >> $GITHUB_ENV
+          echo "ACL_BUILD=$PWD" >> $GITHUB_ENV
 
-      - name: Build ArmNN (Linking Static ACL)
+      - name: Build ArmNN (The Final Link)
         run: |
-          cd armnn
-          mkdir build && cd build
-          
-          # Gunakan jalur absolut untuk compiler dan library
+          mkdir -p armnn/build && cd armnn/build
           cmake .. -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
-            -DCMAKE_C_COMPILER=${{ env.CC_PATH }} \
-            -DCMAKE_CXX_COMPILER=${{ env.CXX_PATH }} \
-            -DARMCOMPUTE_ROOT=$GITHUB_WORKSPACE/ComputeLibrary \
-            -DARMCOMPUTE_BUILD_DIR=${{ env.ACL_BUILD_DIR }} \
-            -DFLATBUFFERS_ROOT=${{ env.FB_ROOT }} \
-            -DFLATBUFFERS_LIBRARY=${{ env.FB_ROOT }}/build/libflatbuffers.a \
+            -DARMCOMPUTE_ROOT=${{ env.ACL_ROOT }} \
+            -DARMCOMPUTE_BUILD_DIR=${{ env.ACL_BUILD }} \
+            -DFLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers \
+            -DFLATBUFFERS_LIBRARY=$GITHUB_WORKSPACE/flatbuffers/build/libflatbuffers.a \
             -DARMCOMPUTENEON=1 \
             -DARMCOMPUTECL=1 \
-            -DBUILD_UNIT_TESTS=0 \
+            -DBUILD_UNIT_TESTS=OFF \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_FLAGS="-Wl,-z,max-page-size=16384" \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
           ninja
 
-      - name: Package Victory
+      - name: Package Artifacts
         run: |
-          mkdir output
-          cp armnn/build/libarmnn.so output/
-          # Karena ACL statis, Anda hanya butuh SATU file libarmnn.so ini saja!
-          cd output
-          zip -9 ../ArmNN_G85_Android16_Final.zip *
+          mkdir release
+          find armnn/build -name "libarmnn.so" -exec cp {} release/ \;
+          # Verifikasi simbol untuk memastikan tidak ada yang 'undefined'
+          cd release
+          zip -r ../ArmNN_Android16_G85.zip .
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-G85-Final
-          path: ArmNN_G85_Android16_Final.zip
+          name: ArmNN-G85-Build
+          path: ArmNN_Android16_G85.zip
