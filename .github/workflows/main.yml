@@ -1,4 +1,4 @@
-name: Build ArmNN Android 16 Final
+name: Build ArmNN Android 16 Stable
 
 on:
   workflow_dispatch:
@@ -36,12 +36,14 @@ jobs:
           echo "FLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers" >> $GITHUB_ENV
 
       - name: Build Compute Library (Android arm64-v8a)
-        # Langkah ini krusial agar file .so tersedia untuk ArmNN
         run: |
-          cd ComputeLibrary
-          # Gunakan scons (alat build resmi ACL)
           sudo apt-get install -y scons
-          scons arch=arm64-v8a neon=1 opencl=1 os=android toolchain_prefix=${{ env.ANDROID_NDK }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35- Werror=0 -j$(nproc)
+          cd ComputeLibrary
+          # Membangun ACL menjadi .so agar ArmNN tidak 'NOTFOUND'
+          scons arch=arm64-v8a neon=1 opencl=1 os=android \
+            toolchain_prefix=${{ env.ANDROID_NDK }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35- \
+            compiler_prefix=aarch64-linux-android35- \
+            extra_cxx_flags="-fPIC" Werror=0 -j$(nproc)
           echo "ACL_ROOT=$GITHUB_WORKSPACE/ComputeLibrary" >> $GITHUB_ENV
 
       - name: Configure and Build ArmNN
@@ -56,7 +58,6 @@ jobs:
             -DARMCOMPUTE_ROOT=${{ env.ACL_ROOT }} \
             -DARMCOMPUTE_BUILD_DIR=${{ env.ACL_ROOT }}/build \
             -DFLATBUFFERS_ROOT=${{ env.FLATBUFFERS_ROOT }} \
-            -DFLATBUFFERS_INCLUDE_PATH=${{ env.FLATBUFFERS_ROOT }}/include \
             -DARMCOMPUTENEON=1 \
             -DARMCOMPUTECL=1 \
             -DARMNNREF=1 \
@@ -65,10 +66,15 @@ jobs:
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
           ninja
 
-      - name: Upload Artifact
+      - name: Package Artifacts
+        run: |
+          mkdir -p final_output
+          cp armnn/build/*.so final_output/
+          cp ComputeLibrary/build/*.so final_output/
+          cd final_output && zip -r ../ArmNN_Android16_G85.zip *
+
+      - name: Upload Binary
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-Android16-G85
-          path: |
-            armnn/build/*.so
-            ComputeLibrary/build/*.so
+          name: ArmNN-Final-G85
+          path: ArmNN_Android16_G85.zip
