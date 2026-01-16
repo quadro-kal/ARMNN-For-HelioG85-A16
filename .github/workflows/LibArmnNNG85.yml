@@ -1,0 +1,125 @@
+name: Build ArmNN Android 16 (SCons Master Fix)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ultimate:
+    runs-on: ubuntu-latest
+    env:
+      NDK_VER: "r27b"
+      # Kita kunci versi ke v24.11 agar sinkron
+      TAG_VER: "v24.11" 
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update -qq
+          # SCons adalah kunci untuk build ACL yang benar
+          sudo apt-get install -y -qq ninja-build git python3 wget unzip scons build-essential
+          # Update CMake
+          wget -qO- https://cmake.org/files/v3.31/cmake-3.31.0-linux-x86_64.tar.gz | sudo tar --strip-components=1 -xzC /usr/local
+
+      - name: Setup Android NDK r27b
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VER }}-linux.zip
+          unzip -q android-ndk-${{ env.NDK_VER }}-linux.zip
+          echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VER }}" >> $GITHUB_ENV
+          # PENTING: Menambahkan toolchain ke PATH agar SCons tidak error
+          echo "$GITHUB_WORKSPACE/android-ndk-${{ env.NDK_VER }}/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Clone Repositories (v24.11)
+        run: |
+          git clone --depth 1 --branch ${{ env.TAG_VER }} https://github.com/ARM-software/ComputeLibrary.git
+          git clone --depth 1 --branch ${{ env.TAG_VER }} https://github.com/ARM-software/armnn.git
+          git clone --depth 1 https://github.com/google/flatbuffers.git
+
+      - name: Build FlatBuffers (Host & Static)
+        run: |
+          cd flatbuffers
+          mkdir build && cd build
+          # Build library statis (.a) agar mudah di-link
+          cmake .. -G Ninja -DFLATBUFFERS_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release -DFLATBUFFERS_BUILD_SHAREDLIB=OFF
+          ninja
+          echo "FLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers" >> $GITHUB_ENV
+
+      - name: Build Compute Library (via SCons)
+        id: build_acl
+        run: |
+          cd ComputeLibrary
+          # SCons Build Command yang SUDAH DIPERBAIKI
+          # Kita pakai 'clang++' langsung karena path sudah ada di $PATH
+          # os=android, arch=arm64-v8a adalah kuncinya
+          scons Werror=0 debug=0 asserts=0 neon=1 opencl=1 embed_kernels=1 os=android arch=arm64-v8a build=native toolchain_prefix="" -j$(nproc)
+          
+          echo "ACL_ROOT=$GITHUB_WORKSPACE/ComputeLibrary" >> $GITHUB_ENV
+          # Di SCons, hasil build ada di folder 'build' tanpa subfolder aneh-aneh
+          echo "ACL_BUILD=$GITHUB_WORKSPACE/ComputeLibrary/build" >> $GITHUB_ENV
+
+      - name: Configure ArmNN (Linking agains SCons Output)
+        run: |
+          mkdir -p armnn/build && cd armnn/build
+          
+          # Tentukan library ACL secara manual agar tidak ada alasan 'Not Found'
+          # SCons biasanya menghasilkan satu file libarm_compute.so yang besar atau terpisah
+          # Kita cek dulu keberadaan file graph
+          
+          ACL_LIB="$GITHUB_WORKSPACE/ComputeLibrary/build/libarm_compute.so"
+          ACL_GRAPH_LIB="$GITHUB_WORKSPACE/ComputeLibrary/build/libarm_compute_graph.so"
+          ACL_CORE_LIB="$GITHUB_WORKSPACE/ComputeLibrary/build/libarm_compute_core.so"
+          
+          # Logika Deteksi Library
+          if [ -f "$ACL_GRAPH_LIB" ]; then
+             echo "Graph Lib Found"
+          else
+             # Jika graph lib tidak ada, mungkin tergabung di libarm_compute.so
+             ACL_GRAPH_LIB=$ACL_LIB
+          fi
+
+          if [ ! -f "$ACL_CORE_LIB" ]; then
+             # Jika core lib tidak ada (versi baru), gunakan lib utama
+             ACL_CORE_LIB=$ACL_LIB
+          fi
+
+          cmake .. \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK_HOME }}/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-35 \
+            -DARMCOMPUTE_ROOT=${{ env.ACL_ROOT }} \
+            -DARMCOMPUTE_BUILD_DIR=${{ env.ACL_BUILD }} \
+            -DARMCOMPUTE_LIB_RELEASE=$ACL_LIB \
+            -DARMCOMPUTE_CORE_LIB_RELEASE=$ACL_CORE_LIB \
+            -DARMCOMPUTE_GRAPH_LIB_RELEASE=$ACL_GRAPH_LIB \
+            -DFLATBUFFERS_ROOT=${{ env.FLATBUFFERS_ROOT }} \
+            -DFLATBUFFERS_LIBRARY=${{ env.FLATBUFFERS_ROOT }}/build/libflatbuffers.a \
+            -DARMCOMPUTENEON=1 \
+            -DARMCOMPUTECL=1 \
+            -DARMNNREF=1 \
+            -DBUILD_UNIT_TESTS=0 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
+
+      - name: Build ArmNN
+        run: |
+          cd armnn/build
+          ninja
+
+      - name: Package & Upload
+        run: |
+          mkdir -p output_final
+          # Ambil hasil dari SCons (ACL) dan Ninja (ArmNN)
+          cp ${{ env.ACL_BUILD }}/*.so output_final/
+          cp armnn/build/*.so output_final/
+          
+          cd output_final
+          zip -9 ../ArmNN_G85_Android16_Complete.zip *.so
+          
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArmNN_G85_Final_Build
+          path: ArmNN_G85_Android16_Complete.zip
