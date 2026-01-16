@@ -1,10 +1,10 @@
-name: Build ArmNN Android 16 (G85)
+name: Build ArmNN Android 16 Final
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-android:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -12,23 +12,17 @@ jobs:
 
       - name: Update CMake to 3.31
         run: |
-          sudo apt-get update -qq
           wget -qO- https://cmake.org/files/v3.31/cmake-3.31.0-linux-x86_64.tar.gz | sudo tar --strip-components=1 -xzC /usr/local
-          cmake --version # Verifikasi versi
-          
-      - name: Install Build Tools
-        run: |
-          sudo apt-get install -y -qq ninja-build git python3 wget unzip
+          cmake --version
 
-      - name: Setup Android NDK r27
+      - name: Setup NDK r27
         run: |
           wget -q https://dl.google.com/android/repository/android-ndk-r27-linux.zip
           unzip -q android-ndk-r27-linux.zip
-          echo "ANDROID_NDK_HOME=$GITHUB_WORKSPACE/android-ndk-r27" >> $GITHUB_ENV
+          echo "ANDROID_NDK=$GITHUB_WORKSPACE/android-ndk-r27" >> $GITHUB_ENV
 
-      - name: Clone ArmNN & Dependencies
+      - name: Clone All Repos
         run: |
-          # Mengambil branch terbaru yang stabil
           git clone --depth 1 https://github.com/ARM-software/ComputeLibrary.git
           git clone --depth 1 https://github.com/ARM-software/armnn.git
           git clone --depth 1 https://github.com/google/flatbuffers.git
@@ -41,37 +35,40 @@ jobs:
           ninja
           echo "FLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers" >> $GITHUB_ENV
 
-      - name: Configure ArmNN (API 35 + 16KB Alignment)
+      - name: Build Compute Library (Android arm64-v8a)
+        # Langkah ini krusial agar file .so tersedia untuk ArmNN
+        run: |
+          cd ComputeLibrary
+          # Gunakan scons (alat build resmi ACL)
+          sudo apt-get install -y scons
+          scons arch=arm64-v8a neon=1 opencl=1 os=android toolchain_prefix=${{ env.ANDROID_NDK }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35- Werror=0 -j$(nproc)
+          echo "ACL_ROOT=$GITHUB_WORKSPACE/ComputeLibrary" >> $GITHUB_ENV
+
+      - name: Configure and Build ArmNN
         run: |
           mkdir -p armnn/build
           cd armnn/build
           cmake .. \
             -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK_HOME }}/build/cmake/android.toolchain.cmake \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.ANDROID_NDK }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-35 \
-            -DARMCOMPUTE_ROOT=$GITHUB_WORKSPACE/ComputeLibrary \
-            -DFLATBUFFERS_ROOT=$GITHUB_WORKSPACE/flatbuffers \
-            -DFLATBUFFERS_INCLUDE_PATH=$GITHUB_WORKSPACE/flatbuffers/include \
+            -DARMCOMPUTE_ROOT=${{ env.ACL_ROOT }} \
+            -DARMCOMPUTE_BUILD_DIR=${{ env.ACL_ROOT }}/build \
+            -DFLATBUFFERS_ROOT=${{ env.FLATBUFFERS_ROOT }} \
+            -DFLATBUFFERS_INCLUDE_PATH=${{ env.FLATBUFFERS_ROOT }}/include \
             -DARMCOMPUTENEON=1 \
             -DARMCOMPUTECL=1 \
             -DARMNNREF=1 \
             -DBUILD_UNIT_TESTS=0 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
-
-      - name: Build ArmNN with Ninja
-        run: |
-          cd armnn/build
           ninja
 
-      - name: Package Artifacts
-        run: |
-          cd armnn/build
-          zip -9 ArmNN_G85_Android16.zip *.so lib*.so*
-
-      - name: Upload Binary
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN_Final_Binary
-          path: armnn/build/ArmNN_G85_Android16.zip
+          name: ArmNN-Android16-G85
+          path: |
+            armnn/build/*.so
+            ComputeLibrary/build/*.so
