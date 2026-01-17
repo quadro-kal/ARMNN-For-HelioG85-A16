@@ -53,20 +53,37 @@ jobs:
           git clone --depth 1 --branch v24.11 https://github.com/ARM-software/armnn.git
           git clone --depth 1 --branch v23.5.26 https://github.com/google/flatbuffers.git
 
-      # CRITICAL FIX: Patch ACL to exclude FP16 kernels for Helio G85
-      - name: Patch ACL for Non-FP16 Hardware
+      # CRITICAL FIX: Disable FP16 in SCons build for Helio G85
+      - name: Patch ACL Build System for Non-FP16 Hardware
         run: |
           cd ComputeLibrary
           
-          # Find and remove ALL FP16 kernel source files
-          echo "=== Removing FP16 kernel files ==="
-          find src/core/NEON/kernels/arm_gemm -name "*fp16*" -type f -delete
-          find src/core/NEON/kernels/arm_gemm -name "*hgemm*" -type f -delete
-          find src/core/NEON/kernels/arm_gemm/kernels -name "*hybrid_fp16*" -type f -delete
+          echo "=== Patching SCons to disable FP16 kernels ==="
           
-          # List remaining files to verify
-          echo "=== Remaining GEMM kernels ==="
-          find src/core/NEON/kernels/arm_gemm/kernels -name "*.cpp" -o -name "*.hpp" | head -20
+          # Method 1: Stub FP16 source files
+          for file in $(find src/core/NEON/kernels/arm_gemm -name "*fp16*.cpp"); do
+            if [ -f "$file" ]; then
+              echo "Stubbing: $file"
+              cat > "$file" << 'EOF'
+// FP16 disabled for Helio G85 compatibility
+namespace arm_gemm {}
+EOF
+            fi
+          done
+          
+          # Method 2: Also stub header files to prevent inclusion errors
+          for file in $(find src/core/NEON/kernels/arm_gemm -name "*fp16*.hpp" -o -name "*hgemm*.hpp"); do
+            if [ -f "$file" ]; then
+              echo "Stubbing header: $file"
+              cat > "$file" << 'EOF'
+// FP16 disabled for Helio G85 compatibility
+#pragma once
+namespace arm_gemm {}
+EOF
+            fi
+          done
+          
+          echo "=== Patching complete ==="
 
       # Build flatc untuk HOST (Linux x86_64)
       - name: Build FlatBuffers Compiler (Host)
