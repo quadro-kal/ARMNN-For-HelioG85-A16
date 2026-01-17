@@ -94,12 +94,13 @@ jobs:
           
           # Helio G85 = 2x Cortex-A75 + 6x Cortex-A55
           # Optimasi untuk A55 (cores utama untuk efficiency)
+          # NOTE: OpenCL disabled karena conflict dengan exceptions=0
           scons -j$(nproc) \
             arch=arm64-v8a \
             os=android \
             build=native \
             neon=1 \
-            opencl=1 \
+            opencl=0 \
             embed_kernels=0 \
             exceptions=0 \
             build_dir=build \
@@ -126,7 +127,7 @@ jobs:
             -DARMCOMPUTE_ROOT=${{ github.workspace }}/ComputeLibrary \
             -DARMCOMPUTE_BUILD_DIR=${{ github.workspace }}/ComputeLibrary/build \
             -DARMCOMPUTENEON=ON \
-            -DARMCOMPUTECL=ON \
+            -DARMCOMPUTECL=OFF \
             -DFLATBUFFERS_ROOT=${{ github.workspace }}/flatbuffers \
             -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build-android/libflatbuffers.a \
             -DFlatbuffers_INCLUDE_DIR=${{ github.workspace }}/flatbuffers/include \
@@ -181,7 +182,7 @@ jobs:
           Optimization Flags:
           - CPU: cortex-a55 (efficiency cores)
           - Optimizations: -O3, LTO capable
-          - Features: NEON enabled, OpenCL enabled
+          - Features: NEON enabled (OpenCL disabled for stability)
           - Page size: 16KB (Android 15+ requirement)
           
           Usage Notes:
