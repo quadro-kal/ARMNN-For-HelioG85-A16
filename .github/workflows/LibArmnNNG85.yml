@@ -16,13 +16,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Debug PATH and Compiler
-        run: |
-          echo "PATH: $PATH"
-          find ${{ env.NDK_ROOT }} -name "clang++" -type f
-          ${{ env.NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --version
-
+        
       - name: Setup Environment
         run: |
           sudo apt-get update -qq
