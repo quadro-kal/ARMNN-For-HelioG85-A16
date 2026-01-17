@@ -107,8 +107,6 @@ jobs:
             Werror=0 \
             standalone=0 \
             examples=0 \
-            validation_tests=0 \
-            benchmark_tests=0 \
             extra_cxx_flags="-mcpu=cortex-a55 -O3 -fno-exceptions -fno-rtti -DNDEBUG -D__ANDROID_API__=${{ env.ANDROID_API }}"
           
           echo "=== ACL Build Output ==="
@@ -127,7 +125,7 @@ jobs:
             -DARMCOMPUTE_ROOT=${{ github.workspace }}/ComputeLibrary \
             -DARMCOMPUTE_BUILD_DIR=${{ github.workspace }}/ComputeLibrary/build \
             -DARMCOMPUTENEON=ON \
-            -DARMCOMPUTECL=OFF \
+            -DARMCOMPUTECL=ON \
             -DFLATBUFFERS_ROOT=${{ github.workspace }}/flatbuffers \
             -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build-android/libflatbuffers.a \
             -DFlatbuffers_INCLUDE_DIR=${{ github.workspace }}/flatbuffers/include \
@@ -182,7 +180,7 @@ jobs:
           Optimization Flags:
           - CPU: cortex-a55 (efficiency cores)
           - Optimizations: -O3, LTO capable
-          - Features: NEON enabled (OpenCL disabled for stability)
+          - Features: NEON enabled, OpenCL enabled
           - Page size: 16KB (Android 15+ requirement)
           
           Usage Notes:
