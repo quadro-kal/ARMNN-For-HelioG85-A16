@@ -53,6 +53,21 @@ jobs:
           git clone --depth 1 --branch v24.11 https://github.com/ARM-software/armnn.git
           git clone --depth 1 --branch v23.5.26 https://github.com/google/flatbuffers.git
 
+      # CRITICAL FIX: Patch ACL to exclude FP16 kernels for Helio G85
+      - name: Patch ACL for Non-FP16 Hardware
+        run: |
+          cd ComputeLibrary
+          
+          # Find and remove ALL FP16 kernel source files
+          echo "=== Removing FP16 kernel files ==="
+          find src/core/NEON/kernels/arm_gemm -name "*fp16*" -type f -delete
+          find src/core/NEON/kernels/arm_gemm -name "*hgemm*" -type f -delete
+          find src/core/NEON/kernels/arm_gemm/kernels -name "*hybrid_fp16*" -type f -delete
+          
+          # List remaining files to verify
+          echo "=== Remaining GEMM kernels ==="
+          find src/core/NEON/kernels/arm_gemm/kernels -name "*.cpp" -o -name "*.hpp" | head -20
+
       # Build flatc untuk HOST (Linux x86_64)
       - name: Build FlatBuffers Compiler (Host)
         run: |
@@ -129,7 +144,7 @@ jobs:
             -DARMCOMPUTE_ROOT=${{ github.workspace }}/ComputeLibrary \
             -DARMCOMPUTE_BUILD_DIR=${{ github.workspace }}/ComputeLibrary/build \
             -DARMCOMPUTENEON=ON \
-            -DARMCOMPUTECL=OFF \
+            -DARMCOMPUTECL=ON \
             -DFLATBUFFERS_ROOT=${{ github.workspace }}/flatbuffers \
             -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build-android/libflatbuffers.a \
             -DFlatbuffers_INCLUDE_DIR=${{ github.workspace }}/flatbuffers/include \
@@ -184,7 +199,7 @@ jobs:
           Optimization Flags:
           - CPU: cortex-a55 (efficiency cores)
           - Optimizations: -O3, LTO capable
-          - Features: NEON enabled (OpenCL disabled for stability)
+          - Features: NEON enabled, OpenCL enabled
           - Page size: 16KB (Android 15+ requirement)
           
           Usage Notes:
