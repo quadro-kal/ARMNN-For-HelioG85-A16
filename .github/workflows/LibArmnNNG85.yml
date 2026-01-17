@@ -1,4 +1,4 @@
-name: ArmNN for MediaTek Helio G85 — Stable Build (v23.0)
+name: ArmNN for MediaTek Helio G85 — 2025 Edition (Main Branch)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NDK_VER: "r27b"
-      ARM_TAG: "v23.0"
+      ARM_TAG: "main"   # ← Gunakan main, bukan tag versi
       FB_TAG: "v23.5.26"
       NDK_ROOT: "${{ github.workspace }}/android-ndk-r27b"
       ANDROID_NDK: "${{ github.workspace }}/android-ndk-r27b"
@@ -39,7 +39,7 @@ jobs:
           export PATH="${{ env.NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           clang++ --version
 
-      - name: Clone Dependencies (v23.0)
+      - name: Clone Dependencies (Main Branch)
         run: |
           clone_with_retry() {
             for i in {1..3}; do
@@ -63,7 +63,7 @@ jobs:
             -DFLATBUFFERS_BUILD_FLATC=ON
           ninja
 
-      - name: Build ACL (v23.0) — Disable FP16
+      - name: Build ACL (Main Branch) — Disable FP16
         run: |
           cd ComputeLibrary
           mkdir build && cd build
@@ -89,7 +89,7 @@ jobs:
           cp libarm_compute*.a release/
           cp libarm_compute*.a debug/
 
-      - name: Build ArmNN (v23.0)
+      - name: Build ArmNN (Main Branch)
         run: |
           mkdir -p armnn/build && cd armnn/build
           cmake .. -G Ninja \
@@ -119,10 +119,10 @@ jobs:
             echo "FATAL: libarmnn.so not found!"
             exit 1
           fi
-          zip -j ArmNN_HelioG85_v23.0.zip armnn/build/libarmnn.so
+          zip -j ArmNN_HelioG85_2025.zip armnn/build/libarmnn.so
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-HelioG85-v23.0
-          path: ArmNN_HelioG85_v23.0.zip
+          name: ArmNN-HelioG85-2025
+          path: ArmNN_HelioG85_2025.zip
