@@ -47,7 +47,8 @@ jobs:
           cmake .. -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_ROOT }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-35 \            -DCMAKE_BUILD_TYPE=Release \
+            -DANDROID_PLATFORM=android-35 \            
+            -DCMAKE_BUILD_TYPE=Release \
             -DFLATBUFFERS_BUILD_TESTS=OFF \
             -DFLATBUFFERS_BUILD_SHAREDLIB=OFF \
             -DFLATBUFFERS_BUILD_FLATC=ON
@@ -96,7 +97,8 @@ jobs:
             -DARMCOMPUTENEON=1 \
             -DARMCOMPUTECL=1 \
             -DBUILD_UNIT_TESTS=OFF \
-            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti" \            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti" \            
+            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
 
