@@ -1,4 +1,4 @@
-name: ArmNN for MediaTek Helio G85 (Optimized & Fixed)
+name: ArmNN for MediaTek Helio G85 (Optimized & Fixed Again)
 
 on:
   workflow_dispatch:
@@ -65,7 +65,7 @@ jobs:
             -DFLATBUFFERS_BUILD_FLATC=ON
           ninja
 
-      - name: Build ACL with Helio G85 Optimizations + Fix Unknown Warnings
+      - name: Build ACL with Helio G85 Optimizations + Disable FP16
         run: |
           cd ComputeLibrary
           mkdir build && cd build
@@ -77,6 +77,7 @@ jobs:
             -DARM_COMPUTE_GRAPH=ON \
             -DARM_COMPUTE_OPENCL=ON \
             -DBUILD_SHARED_LIBS=OFF \
+            -DARM_COMPUTE_ENABLE_FP16=OFF \  # <-- INI YANG PENTING!
             -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti -Wno-unknown-warning-option" \
             -DCMAKE_C_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -Wno-unknown-warning-option" \
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
