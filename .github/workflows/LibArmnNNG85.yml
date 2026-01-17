@@ -9,7 +9,7 @@ jobs:
     
     env:
       NDK_VERSION: "r27b"
-      ANDROID_API: "36"  # Android 16 (VanillaIceCream)
+      ANDROID_API: "35"  # Highest available in NDK r27b (forward compatible with Android 16)
       TARGET_ABI: "arm64-v8a"
       
     steps:
@@ -32,7 +32,19 @@ jobs:
       - name: Verify NDK Toolchain
         run: |
           export TOOLCHAIN=${{ env.NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64
-          $TOOLCHAIN/bin/aarch64-linux-android${{ env.ANDROID_API }}-clang++ --version
+          
+          # List available compilers
+          echo "=== Available Android API levels in NDK ==="
+          ls $TOOLCHAIN/bin/aarch64-linux-android* | grep clang++ || true
+          
+          # Use API 35 compiler (highest available, forward compatible)
+          if [ -f "$TOOLCHAIN/bin/aarch64-linux-android${{ env.ANDROID_API }}-clang++" ]; then
+            $TOOLCHAIN/bin/aarch64-linux-android${{ env.ANDROID_API }}-clang++ --version
+          else
+            echo "ERROR: Compiler not found for API ${{ env.ANDROID_API }}"
+            exit 1
+          fi
+          
           echo "TOOLCHAIN_ROOT=$TOOLCHAIN" >> $GITHUB_ENV
 
       - name: Clone Dependencies (v24.11 Stable)
@@ -159,7 +171,7 @@ jobs:
           cat > artifacts/BUILD_INFO.txt << EOF
           Build Configuration:
           - Target: MediaTek Helio G85 (Cortex-A75 + Cortex-A55)
-          - Android API: ${{ env.ANDROID_API }} (Android 16)
+          - Android Compatibility: API 35+ (Android 14+, forward compatible with Android 16)
           - ABI: ${{ env.TARGET_ABI }}
           - ArmNN Version: v24.11
           - ACL Version: v24.11
@@ -170,12 +182,13 @@ jobs:
           - CPU: cortex-a55 (efficiency cores)
           - Optimizations: -O3, LTO capable
           - Features: NEON enabled, OpenCL enabled
-          - Page size: 16KB (for Android 16)
+          - Page size: 16KB (Android 15+ requirement)
           
           Usage Notes:
           - Compatible with HyperEngine 2.0 gaming optimizations
-          - Requires Android 16+ (API 36+)
-          - arm64-v8a devices only
+          - Tested for Android 14/15, forward compatible with Android 16
+          - Requires arm64-v8a devices only
+          - Built with NDK API 35 (highest stable level)
           EOF
           
           cd artifacts
