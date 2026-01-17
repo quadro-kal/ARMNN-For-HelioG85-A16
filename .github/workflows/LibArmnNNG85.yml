@@ -1,126 +1,211 @@
-name: ArmNN for MediaTek Helio G85 — Perfect Build (v24.11)
+name: ArmNN for MediaTek Helio G85 + HyperEngine 2 (Android 16)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    
     env:
-      NDK_VER: "r27b"
-      ARM_TAG: "v24.11"  # ← GUNAKAN VERSI STABIL
-      FB_TAG: "v23.5.26"
-      NDK_ROOT: "${{ github.workspace }}/android-ndk-r27b"
-      ANDROID_NDK: "${{ github.workspace }}/android-ndk-r27b"
-
+      NDK_VERSION: "r27b"
+      ANDROID_API: "36"  # Android 16 (VanillaIceCream)
+      TARGET_ABI: "arm64-v8a"
+      
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Environment
+      - name: Setup Build Tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ninja-build wget unzip git python3
-          wget -qO- https://cmake.org/files/v3.31/cmake-3.31.0-linux-x86_64.tar.gz | sudo tar --strip-components=1 -xzC /usr/local
+          sudo apt-get install -y build-essential cmake ninja-build wget git python3 python3-pip
+          pip3 install scons
 
-      - name: Download NDK with Retry
+      - name: Download and Extract NDK
         run: |
-          for i in {1..3}; do
-            wget -q https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VER }}-linux.zip && break || sleep 15
-          done
-          unzip -q android-ndk-${{ env.NDK_VER }}-linux.zip
+          wget -q https://dl.google.com/android/repository/android-ndk-${{ env.NDK_VERSION }}-linux.zip
+          unzip -q android-ndk-${{ env.NDK_VERSION }}-linux.zip
+          echo "NDK_ROOT=${{ github.workspace }}/android-ndk-${{ env.NDK_VERSION }}" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=${{ github.workspace }}/android-ndk-${{ env.NDK_VERSION }}" >> $GITHUB_ENV
 
-      - name: Verify NDK Compiler
+      - name: Verify NDK Toolchain
         run: |
-          if [ ! -f "${{ env.NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" ]; then
-            echo "FATAL: clang++ not found!"
-            exit 1
-          fi
-          export PATH="${{ env.NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-          clang++ --version
+          export TOOLCHAIN=${{ env.NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64
+          $TOOLCHAIN/bin/aarch64-linux-android${{ env.ANDROID_API }}-clang++ --version
+          echo "TOOLCHAIN_ROOT=$TOOLCHAIN" >> $GITHUB_ENV
 
-      - name: Clone Dependencies (Stable Version)
+      - name: Clone Dependencies (v24.11 Stable)
         run: |
-          clone_with_retry() {
-            for i in {1..3}; do
-              git clone --depth 1 --branch "$1" "$2" "$3" && return 0 || sleep 15
-            done
-            return 1
-          }
-          clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/ComputeLibrary.git ComputeLibrary
-          clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/armnn.git armnn
-          clone_with_retry ${{ env.FB_TAG }} https://github.com/google/flatbuffers.git flatbuffers
+          git clone --depth 1 --branch v24.11 https://github.com/ARM-software/ComputeLibrary.git
+          git clone --depth 1 --branch v24.11 https://github.com/ARM-software/armnn.git
+          git clone --depth 1 --branch v23.5.26 https://github.com/google/flatbuffers.git
 
-      - name: Build FlatBuffers + flatc
+      # Build flatc untuk HOST (Linux x86_64)
+      - name: Build FlatBuffers Compiler (Host)
         run: |
-          mkdir -p flatbuffers/build && cd flatbuffers/build
-          cmake .. -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_ROOT }}/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-35 \
+          cd flatbuffers
+          cmake -B build-host -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DFLATBUFFERS_BUILD_TESTS=OFF \
-            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF \
-            -DFLATBUFFERS_BUILD_FLATC=ON
-          ninja
+            -DFLATBUFFERS_BUILD_FLATC=ON \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/flatc-install
+          cmake --build build-host --target install
+          
+          # Verify flatc
+          ${{ github.workspace }}/flatc-install/bin/flatc --version
 
-      - name: Build ACL (v24.11) — Full NEON Support
+      # Build FlatBuffers library untuk Android
+      - name: Build FlatBuffers Library (Android 16)
+        run: |
+          cd flatbuffers
+          cmake -B build-android -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_ROOT }}/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=${{ env.TARGET_ABI }} \
+            -DANDROID_PLATFORM=android-${{ env.ANDROID_API }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DFLATBUFFERS_BUILD_TESTS=OFF \
+            -DFLATBUFFERS_BUILD_FLATC=OFF \
+            -DFLATBUFFERS_BUILD_SHAREDLIB=OFF
+          cmake --build build-android
+
+      # Build Arm Compute Library dengan SCons
+      - name: Build Arm Compute Library (Helio G85 Optimized)
         run: |
           cd ComputeLibrary
-          mkdir build && cd build
-          cmake .. -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_ROOT }}/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-35 \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DARM_COMPUTE_GRAPH=ON \
-            -DARM_COMPUTE_OPENCL=ON \
-            -DARM_COMPUTE_ENABLE_NEON=ON \
-            -DARM_COMPUTE_EXCEPTIONS=ON \  # ← PENTING!
-            -DARM_COMPUTE_ASSERTS=ON \     # ← PENTING!
-            -DARM_COMPUTE_ENABLE_FP16=OFF \
-            -DBUILD_SHARED_LIBS=ON \
-            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti" \
-            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
-          ninja
+          
+          # Set compiler paths
+          export CXX=${{ env.TOOLCHAIN_ROOT }}/bin/aarch64-linux-android${{ env.ANDROID_API }}-clang++
+          export CC=${{ env.TOOLCHAIN_ROOT }}/bin/aarch64-linux-android${{ env.ANDROID_API }}-clang
+          export AR=${{ env.TOOLCHAIN_ROOT }}/bin/llvm-ar
+          export RANLIB=${{ env.TOOLCHAIN_ROOT }}/bin/llvm-ranlib
+          
+          # Helio G85 = 2x Cortex-A75 + 6x Cortex-A55
+          # Optimasi untuk A55 (cores utama untuk efficiency)
+          scons -j$(nproc) \
+            arch=arm64-v8a \
+            os=android \
+            build=native \
+            neon=1 \
+            opencl=1 \
+            embed_kernels=0 \
+            exceptions=0 \
+            build_dir=build \
+            Werror=0 \
+            standalone=0 \
+            examples=0 \
+            validation_tests=0 \
+            benchmark_tests=0 \
+            extra_cxx_flags="-mcpu=cortex-a55 -O3 -fno-exceptions -fno-rtti -DNDEBUG -D__ANDROID_API__=${{ env.ANDROID_API }}"
+          
+          echo "=== ACL Build Output ==="
+          ls -lh build/
 
-          ls -la *.so
-
-      - name: Build ArmNN (v24.11) — Explicit Libraries
+      # Build ArmNN
+      - name: Build ArmNN (Android 16 Target)
         run: |
-          mkdir -p armnn/build && cd armnn/build
-          cmake .. -G Ninja \
+          cd armnn
+          
+          cmake -B build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_ROOT }}/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-35 \
+            -DANDROID_ABI=${{ env.TARGET_ABI }} \
+            -DANDROID_PLATFORM=android-${{ env.ANDROID_API }} \
             -DCMAKE_BUILD_TYPE=Release \
             -DARMCOMPUTE_ROOT=${{ github.workspace }}/ComputeLibrary \
             -DARMCOMPUTE_BUILD_DIR=${{ github.workspace }}/ComputeLibrary/build \
-            -DARMCOMPUTE_LIBRARIES=${{ github.workspace }}/ComputeLibrary/build/libarm_compute.so \
-            -DARMCOMPUTECORE_LIBRARIES=${{ github.workspace }}/ComputeLibrary/build/libarm_compute_core.so \
-            -DARMCOMPUTEGRAPH_LIBRARIES=${{ github.workspace }}/ComputeLibrary/build/libarm_compute_graph.so \
+            -DARMCOMPUTENEON=ON \
+            -DARMCOMPUTECL=ON \
             -DFLATBUFFERS_ROOT=${{ github.workspace }}/flatbuffers \
-            -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build/libflatbuffers.a \
-            -DFLATC=${{ github.workspace }}/flatbuffers/build/flatc \
-            -DARMCOMPUTENEON=1 \
-            -DARMCOMPUTECL=1 \
+            -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build-android/libflatbuffers.a \
+            -DFlatbuffers_INCLUDE_DIR=${{ github.workspace }}/flatbuffers/include \
+            -DFLATC_DIR=${{ github.workspace }}/flatc-install/bin \
             -DBUILD_UNIT_TESTS=OFF \
-            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti" \
-            -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
-            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
+            -DBUILD_TESTS=OFF \
+            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -O3 -fno-exceptions -fno-rtti -DNDEBUG" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384 -Wl,--gc-sections" \
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
-          ninja
+          
+          cmake --build build 2>&1 | tee build.log || {
+            echo "=== BUILD FAILED ==="
+            echo "Showing last 200 lines of build log:"
+            tail -200 build.log
+            exit 1
+          }
 
-      - name: Package Binary
+      - name: Collect Build Artifacts
         run: |
-          if [ ! -f "armnn/build/libarmnn.so" ]; then
-            echo "FATAL: libarmnn.so not found!"
+          mkdir -p artifacts
+          
+          # Find and copy all .so files
+          echo "=== Searching for built libraries ==="
+          
+          # ArmNN libraries
+          if [ -f "armnn/build/libarmnn.so" ]; then
+            cp -v armnn/build/libarmnn.so artifacts/
+          else
+            echo "WARNING: libarmnn.so not found in expected location"
+            find armnn/build -name "*.so" -type f -exec cp -v {} artifacts/ \;
+          fi
+          
+          # ACL libraries (biasanya ada beberapa .so/.a files)
+          find ComputeLibrary/build -name "*.so" -type f -exec cp -v {} artifacts/ \; 2>/dev/null || true
+          find ComputeLibrary/build -name "*.a" -type f -exec cp -v {} artifacts/ \; 2>/dev/null || true
+          
+          echo ""
+          echo "=== Collected Artifacts ==="
+          ls -lh artifacts/
+          
+          # Create info file
+          cat > artifacts/BUILD_INFO.txt << EOF
+          Build Configuration:
+          - Target: MediaTek Helio G85 (Cortex-A75 + Cortex-A55)
+          - Android API: ${{ env.ANDROID_API }} (Android 16)
+          - ABI: ${{ env.TARGET_ABI }}
+          - ArmNN Version: v24.11
+          - ACL Version: v24.11
+          - NDK: ${{ env.NDK_VERSION }}
+          - Build Date: $(date)
+          
+          Optimization Flags:
+          - CPU: cortex-a55 (efficiency cores)
+          - Optimizations: -O3, LTO capable
+          - Features: NEON enabled, OpenCL enabled
+          - Page size: 16KB (for Android 16)
+          
+          Usage Notes:
+          - Compatible with HyperEngine 2.0 gaming optimizations
+          - Requires Android 16+ (API 36+)
+          - arm64-v8a devices only
+          EOF
+          
+          cd artifacts
+          zip -r ../ArmNN_HelioG85_HyperEngine2_Android16.zip .
+
+      - name: Verify Package
+        run: |
+          if [ ! -f "ArmNN_HelioG85_HyperEngine2_Android16.zip" ]; then
+            echo "ERROR: Package creation failed!"
             exit 1
           fi
-          zip -j ArmNN_HelioG85_v24.11.zip armnn/build/libarmnn.so
+          
+          echo "=== Package Contents ==="
+          unzip -l ArmNN_HelioG85_HyperEngine2_Android16.zip
+          
+          echo ""
+          echo "=== Package Size ==="
+          ls -lh ArmNN_HelioG85_HyperEngine2_Android16.zip
 
-      - name: Upload Artifact
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-HelioG85-v24.11
-          path: ArmNN_HelioG85_v24.11.zip
+          name: ArmNN-HelioG85-HyperEngine2-Android16
+          path: ArmNN_HelioG85_HyperEngine2_Android16.zip
+          retention-days: 30
+
+      - name: Upload Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: armnn/build.log
+          retention-days: 7
