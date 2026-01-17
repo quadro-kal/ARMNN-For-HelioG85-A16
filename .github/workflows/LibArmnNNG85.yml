@@ -47,7 +47,8 @@ jobs:
             done
             return 1
           }
-          clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/ComputeLibrary.git ComputeLibrary          clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/armnn.git armnn
+          clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/ComputeLibrary.git ComputeLibrary          
+          clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/armnn.git armnn
           clone_with_retry ${{ env.FB_TAG }} https://github.com/google/flatbuffers.git flatbuffers
 
       - name: Build FlatBuffers + flatc
@@ -96,7 +97,8 @@ jobs:
             -DARMCOMPUTE_ROOT=${{ github.workspace }}/ComputeLibrary \
             -DARMCOMPUTE_BUILD_DIR=${{ github.workspace }}/ComputeLibrary/build \
             -DFLATBUFFERS_ROOT=${{ github.workspace }}/flatbuffers \
-            -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build/libflatbuffers.a \            -DFLATC=${{ github.workspace }}/flatbuffers/build/flatc \
+            -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build/libflatbuffers.a \            
+            -DFLATC=${{ github.workspace }}/flatbuffers/build/flatc \
             -DARMCOMPUTENEON=1 \
             -DARMCOMPUTECL=1 \
             -DBUILD_UNIT_TESTS=OFF \
