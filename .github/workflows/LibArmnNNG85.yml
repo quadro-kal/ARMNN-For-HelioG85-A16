@@ -1,4 +1,4 @@
-name: ArmNN for MediaTek Helio G85 — Perfect Build (2025)
+name: ArmNN for MediaTek Helio G85 — Perfect Build (v24.11)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NDK_VER: "r27b"
-      ARM_TAG: "main"
+      ARM_TAG: "v24.11"  # ← GUNAKAN VERSI STABIL
       FB_TAG: "v23.5.26"
       NDK_ROOT: "${{ github.workspace }}/android-ndk-r27b"
       ANDROID_NDK: "${{ github.workspace }}/android-ndk-r27b"
@@ -39,7 +39,7 @@ jobs:
           export PATH="${{ env.NDK_ROOT }}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           clang++ --version
 
-      - name: Clone Dependencies (Main Branch)
+      - name: Clone Dependencies (Stable Version)
         run: |
           clone_with_retry() {
             for i in {1..3}; do
@@ -47,7 +47,7 @@ jobs:
             done
             return 1
           }
-          clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/ComputeLibrary.git ComputeLibrary          
+          clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/ComputeLibrary.git ComputeLibrary
           clone_with_retry ${{ env.ARM_TAG }} https://github.com/ARM-software/armnn.git armnn
           clone_with_retry ${{ env.FB_TAG }} https://github.com/google/flatbuffers.git flatbuffers
 
@@ -64,11 +64,10 @@ jobs:
             -DFLATBUFFERS_BUILD_FLATC=ON
           ninja
 
-      - name: Build ACL (Main Branch) — Shared Library + Disable FP16
+      - name: Build ACL (v24.11) — Full NEON Support
         run: |
           cd ComputeLibrary
           mkdir build && cd build
-          # SINGLE-LINE CMAKE COMMAND TO AVOID SHELL SYNTAX ERRORS
           cmake .. -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_ROOT }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
@@ -76,19 +75,20 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DARM_COMPUTE_GRAPH=ON \
             -DARM_COMPUTE_OPENCL=ON \
-            -DBUILD_SHARED_LIBS=ON \
+            -DARM_COMPUTE_ENABLE_NEON=ON \
+            -DARM_COMPUTE_EXCEPTIONS=ON \  # ← PENTING!
+            -DARM_COMPUTE_ASSERTS=ON \     # ← PENTING!
             -DARM_COMPUTE_ENABLE_FP16=OFF \
-            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti -Wno-unknown-warning-option" \
-            -DCMAKE_C_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -Wno-unknown-warning-option" \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti" \
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
           ninja
 
           ls -la *.so
 
-      - name: Build ArmNN (Main Branch)
+      - name: Build ArmNN (v24.11) — Explicit Libraries
         run: |
           mkdir -p armnn/build && cd armnn/build
-          # SINGLE-LINE CMAKE COMMAND TO AVOID SHELL SYNTAX ERRORS
           cmake .. -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE=${{ env.NDK_ROOT }}/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
@@ -96,13 +96,16 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DARMCOMPUTE_ROOT=${{ github.workspace }}/ComputeLibrary \
             -DARMCOMPUTE_BUILD_DIR=${{ github.workspace }}/ComputeLibrary/build \
+            -DARMCOMPUTE_LIBRARIES=${{ github.workspace }}/ComputeLibrary/build/libarm_compute.so \
+            -DARMCOMPUTECORE_LIBRARIES=${{ github.workspace }}/ComputeLibrary/build/libarm_compute_core.so \
+            -DARMCOMPUTEGRAPH_LIBRARIES=${{ github.workspace }}/ComputeLibrary/build/libarm_compute_graph.so \
             -DFLATBUFFERS_ROOT=${{ github.workspace }}/flatbuffers \
-            -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build/libflatbuffers.a \            
+            -DFLATBUFFERS_LIBRARY=${{ github.workspace }}/flatbuffers/build/libflatbuffers.a \
             -DFLATC=${{ github.workspace }}/flatbuffers/build/flatc \
             -DARMCOMPUTENEON=1 \
             -DARMCOMPUTECL=1 \
             -DBUILD_UNIT_TESTS=OFF \
-            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti -Wno-unknown-warning-option" \
+            -DCMAKE_CXX_FLAGS="-mcpu=cortex-a55 -mtune=cortex-a55 -O3 -flto -fno-exceptions -fno-rtti" \
             -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384" \
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
@@ -114,10 +117,10 @@ jobs:
             echo "FATAL: libarmnn.so not found!"
             exit 1
           fi
-          zip -j ArmNN_HelioG85_Perfect.zip armnn/build/libarmnn.so
+          zip -j ArmNN_HelioG85_v24.11.zip armnn/build/libarmnn.so
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ArmNN-HelioG85-Perfect
-          path: ArmNN_HelioG85_Perfect.zip
+          name: ArmNN-HelioG85-v24.11
+          path: ArmNN_HelioG85_v24.11.zip
