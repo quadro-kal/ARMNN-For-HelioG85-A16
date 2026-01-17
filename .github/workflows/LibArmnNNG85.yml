@@ -6,7 +6,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    
     env:
       NDK_VERSION: "r27b"
       ANDROID_API: "35"  # Highest available in NDK r27b (forward compatible with Android 16)
